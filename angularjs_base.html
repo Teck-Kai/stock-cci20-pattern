@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html>
+<script src="https://ajax.googleapis.com/ajax/libs/angularjs/1.6.9/angular.min.js"></script>
+<body>
+
+<div ng-app="myApp" ng-controller="myCtrl"> 
+
+<div><span>Average Volume: </span>{{averageVolume/1000}} K</div>
+
+<table>
+	<tr>
+		<td>startTime</td>
+		<td>endTime</td>
+		<td>startPoint</td>
+		<td>endPoint</td>
+		<td>difference</td>
+		<td>startPrice</td>
+		<td>endPrice</td>
+		<td>Price Diff (%)</td>
+		<td>Day Diff</td>
+	</tr>
+	<tr ng-repeat="summary in summary | orderBy: 'startTime'"> 
+		<td>{{summary.startTime}}</td>
+		<td>{{summary.endTime}}</td>
+		<td>{{summary.startPoint}}</td>
+		<td>{{summary.endPoint}}</td>
+		<td>{{summary.difference}}</td>
+		<td>{{summary.startPrice}}</td>
+		<td>{{summary.endPrice}}</td>
+		<td>{{summary.pricePer}}</td>
+		<td>{{summary.dayDiff}}</td>
+	</tr>
+</table>
+
+</div>
+
+<script>
+var app = angular.module('myApp', []);
+app.controller('myCtrl', function($scope, $http, $filter, $location) {
+
+	var param = $location.absUrl().substring($location.absUrl().indexOf("test=") +5 , $location.absUrl().indexOf("test=") + 9)
+
+
+	var myUrl;
+	
+	//  But if you make it from a browser, then it will work without problem ...
+
+	// However to make it work, we are going to use the cors-anywhere free service to bypass this
+	var proxy = 'https://cors-anywhere.herokuapp.com/';
+
+	$http.get(proxy + myUrl).then(function(response){
+			$scope.json = response.data;
+			
+			$scope.formattedJson = [];
+
+			for(var i=0; i< $scope.json.t.length; i++){
+				$scope.formattedJson.push({
+					t: $scope.json.t[i]*1000,
+					c: Number($scope.json.c[i]),
+					o: Number($scope.json.o[i]),
+					h: Number($scope.json.h[i]),
+					l: Number($scope.json.l[i]),
+					v: Number($scope.json.v[i])
+				});
+			}
+
+			var volume = 0;
+			angular.forEach($scope.formattedJson, json => {
+				var typical = (json.c + json.h + json.l)/3;
+				json.typical = typical;
+				volume += json.v;
+			});
+
+			$scope.averageVolume = volume/$scope.formattedJson.length;
+
+			for(var i=20; i <$scope.formattedJson.length ; i++){
+				var sma=0;
+				var mean=0;
+				for(var j = i-20; j<i; j++){
+					sma += $scope.formattedJson[j].typical;
+				}
+				
+				$scope.formattedJson[i].sma = sma/20;
+				
+				for(var j = i-20; j<i; j++){
+					mean += Math.abs(sma/20 - $scope.formattedJson[j].typical);
+				}
+
+				$scope.formattedJson[i].mean = mean/20;
+
+				$scope.formattedJson[i].cci = ($scope.formattedJson[i].typical-$scope.formattedJson[i].sma)/(0.015*$scope.formattedJson[i].mean);
+			}
+
+			console.log($scope.formattedJson);
+
+			var isPositiveTrend = true;
+			var startIndex = 20;
+			var lowestPoint = -1000;
+			var highestPointIndex;
+			var highestPoint = -1000;
+			$scope.summary = [];
+
+			for(var i=20; i <$scope.formattedJson.length-1 ; i++){
+				if(isPositiveTrend && (lowestPoint < $scope.formattedJson[i].cci) && $scope.formattedJson[i - 1].cci > $scope.formattedJson[i].cci){
+					lowestPoint = $scope.formattedJson[i].cci;
+					console.log("A: lowest point =" + lowestPoint + " "+ new Date($scope.formattedJson[i].t));
+				}else if(($scope.formattedJson[i].cci > $scope.formattedJson[i -1].cci) && isPositiveTrend && $scope.formattedJson[i].cci > highestPoint){
+					highestPointIndex = i;
+					highestPoint= $scope.formattedJson[i].cci;
+					console.log("B: highest point =" + highestPoint+ " "+ new Date($scope.formattedJson[i].t));
+				}else if(lowestPoint >  $scope.formattedJson[i].cci && isPositiveTrend){//($scope.formattedJson[i + 1].cci < $scope.formattedJson[i].cci)
+					console.log("C: highest point index =" + highestPointIndex+ " "+ new Date($scope.formattedJson[i].t));
+					addModal($scope.formattedJson, highestPointIndex, startIndex);
+					isPositiveTrend = false;
+					lowestPoint = -1000;
+					highestPointIndex = 0;
+					highestPoint = -1000;
+
+					if(($scope.formattedJson[i + 1].cci > $scope.formattedJson[i].cci)){
+						isPositiveTrend = true;
+						startIndex = i;
+					}					
+				}else if(($scope.formattedJson[i + 1].cci < $scope.formattedJson[i].cci) && isPositiveTrend && (lowestPoint == -1000)){
+					addModal($scope.formattedJson, i, startIndex);
+					isPositiveTrend = false;
+					lowestPoint = -1000;
+					highestPointIndex = 0;
+					highestPoint = -1000;
+					console.log("D"+ " "+ new Date($scope.formattedJson[i].t));
+				}else if(($scope.formattedJson[i + 1].cci > $scope.formattedJson[i].cci) && !isPositiveTrend){
+					isPositiveTrend = true;
+					startIndex = i;
+					console.log("E"+ " "+ new Date($scope.formattedJson[i].t));
+				}
+			}
+
+			isPositiveTrend = true;
+			 for(var i=20; i <$scope.formattedJson.length-1 ; i++){
+				if(($scope.formattedJson[i + 1].cci < $scope.formattedJson[i].cci) && isPositiveTrend){
+
+				}else if(($scope.formattedJson[i + 1].cci > $scope.formattedJson[i].cci) && !isPositiveTrend){
+					isPositiveTrend = true;
+					startIndex = i;
+				}
+			 }
+
+	});
+
+	function addModal(formattedJson,i, startIndex){
+		var difference = formattedJson[i].cci - formattedJson[startIndex].cci;
+		var pricePer = ((formattedJson[i].c - formattedJson[startIndex].c)/formattedJson[startIndex].c)*100;
+		if(difference > 200 && pricePer >5 && $scope.formattedJson[i-1].cci > 100 && $scope.formattedJson[startIndex].cci <-100){
+			var dayDiff = 0;
+			if($scope.summary.length >0){
+				dayDiff = formattedJson[startIndex].t - $scope.summary[$scope.summary.length-1].startTime;
+				dayDiff = Math.ceil(dayDiff / (1000 * 60 * 60 * 24)); 
+			}
+			
+			$scope.summary.push(
+				{
+					startTime: new Date(formattedJson[startIndex].t),
+					endTime: new Date(formattedJson[i].t),
+					startPoint: formattedJson[startIndex].cci,
+					endPoint: formattedJson[i].cci,
+					difference: i - startIndex,
+					startPrice: formattedJson[startIndex].c,
+					endPrice: formattedJson[i].c,
+					pricePer: pricePer,
+					dayDiff: dayDiff
+				}
+			);
+		}
+	}
+});
+
+</script>
+
+</body>
+</html>
